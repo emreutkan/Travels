@@ -190,9 +190,9 @@ body.ready .bleed-title {
   }
 
   .bleed-title {
-    font-size: 26vw;
-    letter-spacing: 0.14em;
-    text-indent: 0.14em;
+    font-size: 22vw;
+    letter-spacing: 0.12em;
+    text-indent: 0.12em;
     transform: translateY(-0.08em);
   }
 
