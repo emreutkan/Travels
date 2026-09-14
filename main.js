@@ -123,7 +123,7 @@ if (view.has('still')) {
     .querySelectorAll('.hud')
     .forEach((el) => (el.style.animation = 'none'));
 }
-camera.position.z = parseFloat(view.get('zoom') ?? '3.3');
+camera.position.z = parseFloat(view.get('zoom') ?? '2.05');
 
 const globe = new THREE.Mesh(
   new THREE.SphereGeometry(R, 128, 128),
@@ -189,6 +189,8 @@ const rim = new THREE.Mesh(
 
 const tilt = new THREE.Group();
 tilt.rotation.z = -0.07;
+// drop the disc below frame centre so the bottom edge sits around the equator
+tilt.position.y = -parseFloat(view.get('yoff') ?? '0.55');
 const spin = new THREE.Group();
 spin.add(globe, graticule, rim);
 tilt.add(spin);
@@ -197,8 +199,8 @@ scene.add(tilt);
 // open on the Mediterranean like the reference (override with ?lon=&lat=)
 // (texture lon 0 sits on +X and world-facing +Z shows lon 90°W, so the
 //  Y-rotation that brings lon L to the front is -90 - L)
-const faceLon = parseFloat(view.get('lon') ?? '-22');
-const faceLat = parseFloat(view.get('lat') ?? '36');
+const faceLon = parseFloat(view.get('lon') ?? '-30');
+const faceLat = parseFloat(view.get('lat') ?? '8');
 spin.quaternion
   .setFromAxisAngle(
     new THREE.Vector3(0, 1, 0),
