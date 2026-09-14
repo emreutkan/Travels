@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { geoEquirectangular, geoPath, geoGraticule10 } from 'd3-geo';
+import { geoEquirectangular, geoPath, geoGraticule10, geoContains } from 'd3-geo';
 import { feature, mesh } from 'topojson-client';
 
 const BG = 0x050505;
@@ -77,6 +77,9 @@ const texture = new THREE.CanvasTexture(texCanvas);
 texture.colorSpace = THREE.SRGBColorSpace;
 texture.anisotropy = 8;
 
+// currently selected country (ISO id string) — null = show everything
+let selectedId = null;
+
 // KKTC flag — not an ISO country, drawn procedurally:
 // white field, two red horizontal bands, red crescent + star centred
 function makeKktcFlag() {
@@ -130,7 +133,9 @@ for (const code of flagCodes) {
   };
   img.onload = () => {
     done();
-    paint();
+    // repaint once when all flags are in — repainting per flag re-uploads
+    // the 8K texture to the GPU every load and stutters the reveal
+    if (flagsDone === flagCodes.length) paint();
   };
   img.onerror = done;
   flagImgs[code] = img;
@@ -182,6 +187,11 @@ function paint() {
         texCtx.clip();
       }
       texCtx.drawImage(img, x0, y0, x1 - x0, y1 - y0);
+      // a selected country keeps its flag — the rest dim to the background
+      if (selectedId && String(f.id) !== selectedId) {
+        texCtx.fillStyle = 'rgba(0,0,0,0.62)';
+        texCtx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      }
       texCtx.restore();
     }
   }
@@ -214,7 +224,7 @@ if (view.has('still')) {
   // deterministic screenshots: skip the intro fade too
   document.getElementById('scene').style.transition = 'none';
   document
-    .querySelectorAll('.hud, .bleed-title')
+    .querySelectorAll('.bleed-title')
     .forEach((el) => {
       el.style.transition = 'none';
       el.style.opacity = '1';
@@ -321,87 +331,70 @@ function dirFromLatLon(lat, lon) {
 }
 
 // ---------- leader lines pulled out from each visited city ----------
-// [label, lat, lon, years] — one line pulled out per year
+// [label, lat, lon, years, countryId] — one line pulled out per year
 const ENTRIES = [
-  ['Türkiye, İzmir', 38.42, 27.14, ['born 2001']],
-  ['Greece, Chios', 38.37, 26.06, ['2015']],
-  ['KKTC', 35.2, 33.35, ['2019']],
-  ['Bosnia and Herz., Sarajevo', 43.86, 18.41, ['2024']],
-  ['United States, New Jersey', 40.06, -74.41, ['2024']],
-  ['United States, New York City', 40.71, -74.01, ['2024']],
-  ['United States, Miami', 25.76, -80.19, ['2024']],
-  ['United States, California', 36.78, -119.42, ['2024']],
-  ['Austria, Vienna', 48.21, 16.37, ['2025']],
-  ['Czech Republic, Prague', 50.08, 14.44, ['2025']],
-  ['Italy, Naples', 40.85, 14.27, ['2024', '2025']],
-  ['Italy, Florence', 43.77, 11.25, ['2024', '2025']],
-  ['Italy, Pisa', 43.72, 10.4, ['2025']],
-  ['Italy, Siena', 43.32, 11.33, ['2025']],
-  ['Italy, Rome', 41.9, 12.5, ['2024', '2025']],
-  ['Italy, Venice', 45.44, 12.34, ['2024', '2025']],
-  ['Italy, Verona', 45.44, 10.99, ['2024', '2025']],
-  ['Italy, Lake Garda', 45.6, 10.55, ['2024', '2025']],
-  ['Italy, Milan', 45.46, 9.19, ['2023', '2024', '2025']],
-  ['Italy, Genova', 44.41, 8.93, ['2023']],
-  ['Monaco, Monte-Carlo', 43.74, 7.42, ['2023']],
-  ['Spain, Barcelona', 41.39, 2.17, ['2025']],
-  ['Hungary, Budapest', 47.5, 19.04, ['2024', '2025']],
-  ['Greece, Samos', 37.75, 26.9, ['2023']],
+  ['Türkiye, İzmir', 38.42, 27.14, ['born 2001'], '792'],
+  ['Greece, Chios', 38.37, 26.06, ['2015'], '300'],
+  ['KKTC', 35.2, 33.35, ['2019'], '196'],
+  ['Bosnia and Herz., Sarajevo', 43.86, 18.41, ['2024'], '070'],
+  ['United States, New Jersey', 40.06, -74.41, ['2024'], '840'],
+  ['United States, New York City', 40.71, -74.01, ['2024'], '840'],
+  ['United States, Miami', 25.76, -80.19, ['2024'], '840'],
+  ['United States, California', 36.78, -119.42, ['2024'], '840'],
+  ['Austria, Vienna', 48.21, 16.37, ['2025'], '040'],
+  ['Czech Republic, Prague', 50.08, 14.44, ['2025'], '203'],
+  ['Italy, Naples', 40.85, 14.27, ['2024', '2025'], '380'],
+  ['Italy, Florence', 43.77, 11.25, ['2024', '2025'], '380'],
+  ['Italy, Pisa', 43.72, 10.4, ['2025'], '380'],
+  ['Italy, Siena', 43.32, 11.33, ['2025'], '380'],
+  ['Italy, Rome', 41.9, 12.5, ['2024', '2025'], '380'],
+  ['Italy, Venice', 45.44, 12.34, ['2024', '2025'], '380'],
+  ['Italy, Verona', 45.44, 10.99, ['2024', '2025'], '380'],
+  ['Italy, Lake Garda', 45.6, 10.55, ['2024', '2025'], '380'],
+  ['Italy, Milan', 45.46, 9.19, ['2023', '2024', '2025'], '380'],
+  ['Italy, Genova', 44.41, 8.93, ['2023'], '380'],
+  ['Monaco, Monte-Carlo', 43.74, 7.42, ['2023'], '492'],
+  ['Spain, Barcelona', 41.39, 2.17, ['2025'], '724'],
+  ['Hungary, Budapest', 47.5, 19.04, ['2024', '2025'], '348'],
+  ['Greece, Samos', 37.75, 26.9, ['2023'], '300'],
 ];
 
 const labelLayer = document.createElement('div');
 labelLayer.id = 'labels';
 document.body.appendChild(labelLayer);
 
-const lineVerts = [];
-const anchors = []; // {dir, tip, el}
+const anchors = []; // {dir, tip, el, cid}
+const byCid = new Map(); // cid -> {lineVerts, pts}
 let slot = 0;
-for (const [name, lat, lon, years] of ENTRIES) {
+for (const [name, lat, lon, years, cid] of ENTRIES) {
   const dir = dirFromLatLon(lat, lon);
+  if (!byCid.has(cid)) byCid.set(cid, { lineVerts: [], pts: [] });
+  const g = byCid.get(cid);
+  g.pts.push(dir.x * (R + 0.005), dir.y * (R + 0.005), dir.z * (R + 0.005));
   years.forEach((year, j) => {
     // stagger line lengths so nearby labels fan out instead of stacking
     const len = 0.1 + (slot % 6) * 0.06 + j * 0.07;
     const base = dir.clone().multiplyScalar(R + 0.005);
     const tip = dir.clone().multiplyScalar(R + 0.005 + len);
-    lineVerts.push(base.x, base.y, base.z, tip.x, tip.y, tip.z);
+    g.lineVerts.push(base.x, base.y, base.z, tip.x, tip.y, tip.z);
     const el = document.createElement('div');
     el.className = 'city-label';
     el.innerHTML = `${name}<span class="cl-year">${year}</span>`;
     labelLayer.appendChild(el);
-    anchors.push({ dir, tip, el, x: 0, y: 0, fade: 0 });
+    anchors.push({ dir, tip, el, cid, x: 0, y: 0, fade: 0, w: 0 });
     slot++;
   });
 }
-const leaderGeo = new THREE.BufferGeometry();
-leaderGeo.setAttribute(
-  'position',
-  new THREE.Float32BufferAttribute(lineVerts, 3)
-);
-spin.add(
-  new THREE.LineSegments(
-    leaderGeo,
-    new THREE.LineBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.45,
-    })
-  )
-);
 
-// marker dot at each entry location — same shader trick as before
-const cityGeo = new THREE.BufferGeometry();
-cityGeo.setAttribute(
-  'position',
-  new THREE.Float32BufferAttribute(
-    ENTRIES.flatMap(([, lat, lon]) => {
-      const d = dirFromLatLon(lat, lon);
-      return [d.x * (R + 0.005), d.y * (R + 0.005), d.z * (R + 0.005)];
-    }),
-    3
-  )
-);
-const cityMat = new THREE.ShaderMaterial({
-  uniforms: { uSize: { value: 0.0105 }, uHeight: { value: 1 } },
+// marker: solid core + faint ring — reads as a pin over busy flags
+const markerProto = new THREE.ShaderMaterial({
+  uniforms: {
+    uSize: { value: 0.016 },
+    uHeight: { value: 1 },
+    uAlpha: { value: 1 },
+  },
+  transparent: true,
+  depthWrite: false,
   vertexShader: /* glsl */ `
     uniform float uSize;
     uniform float uHeight;
@@ -412,15 +405,39 @@ const cityMat = new THREE.ShaderMaterial({
     }
   `,
   fragmentShader: /* glsl */ `
+    uniform float uAlpha;
     void main() {
       vec2 c = gl_PointCoord - 0.5;
       float d = length(c);
       if (d > 0.5) discard;
-      gl_FragColor = vec4(1.0);
+      gl_FragColor = vec4(vec3(1.0), (d < 0.30 ? 1.0 : 0.55) * uAlpha);
     }
   `,
 });
-spin.add(new THREE.Points(cityGeo, cityMat));
+
+// one line/point object per country so a selection can dim the rest
+const countryGroups = []; // {cid, lineMat, pointMat}
+for (const [cid, g] of byCid) {
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(g.lineVerts, 3)
+  );
+  const lineMat = new THREE.LineBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.45,
+  });
+  const pointGeo = new THREE.BufferGeometry();
+  pointGeo.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(g.pts, 3)
+  );
+  const pointMat = markerProto.clone();
+  spin.add(new THREE.LineSegments(lineGeo, lineMat));
+  spin.add(new THREE.Points(pointGeo, pointMat));
+  countryGroups.push({ cid, lineMat, pointMat });
+}
 
 // open on the Mediterranean like the reference (override with ?lon=&lat=)
 // (texture lon 0 sits on +X and world-facing +Z shows lon 90°W, so the
@@ -459,18 +476,79 @@ function applyWorldRotation(axis, angle) {
   spin.quaternion.premultiply(qTmp);
 }
 
+// pick which visited country is under a client point (null = none)
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+function pickCountry(clientX, clientY) {
+  // camera isn't in the scene graph — its matrixWorld only refreshes on render,
+  // so a pick before/without a render casts from inside the sphere and misses
+  camera.updateMatrixWorld();
+  scene.updateMatrixWorld(true);
+  ndc.set((clientX / viewW()) * 2 - 1, -((clientY / viewH()) * 2 - 1));
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(globe, false)[0];
+  if (!hit) return null;
+  const v = globe.worldToLocal(hit.point.clone()).normalize();
+  const lat = 90 - (Math.acos(Math.min(1, Math.max(-1, v.y))) * 180) / Math.PI;
+  let lon = (Math.atan2(v.z, -v.x) * 180) / Math.PI - 180;
+  if (lon < -180) lon += 360;
+  for (const f of countries.features) {
+    if (VISITED[f.id] && geoContains(f, [lon, lat])) return String(f.id);
+  }
+  return null;
+}
+
+function applySelection() {
+  for (const g of countryGroups) {
+    const dim = selectedId && g.cid !== selectedId;
+    g.lineMat.opacity = dim ? 0.05 : 0.45;
+    g.pointMat.uniforms.uAlpha.value = dim ? 0.15 : 1;
+  }
+  paint(); // re-render the texture with unselected flags dimmed
+}
+
+const clampZ = (z) => Math.min(Math.max(z, 1.55), 7);
+
+const pointers = new Map(); // active pointerId -> [x, y]
+let pinched = false;
+let lastPinchD = 0;
+let downX = 0;
+let downY = 0;
+
 canvas.addEventListener('pointerdown', (e) => {
+  pointers.set(e.pointerId, [e.clientX, e.clientY]);
   dragging = true;
   canvas.classList.add('dragging');
   canvas.setPointerCapture(e.pointerId);
-  lastX = e.clientX;
-  lastY = e.clientY;
+  downX = lastX = e.clientX;
+  downY = lastY = e.clientY;
   lastT = performance.now();
   velX = 0;
   idleTime = 0;
 });
 
 canvas.addEventListener('pointermove', (e) => {
+  if (!pointers.has(e.pointerId)) {
+    // hover: afford a pointer cursor over clickable (painted) countries
+    const now = performance.now();
+    if (now - (pickT || 0) > 90) {
+      pickT = now;
+      canvas.style.cursor = pickCountry(e.clientX, e.clientY)
+        ? 'pointer'
+        : 'grab';
+    }
+    return;
+  }
+  pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  // two fingers down = pinch zoom, not rotation
+  if (pointers.size === 2) {
+    pinched = true;
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    if (lastPinchD) camera.position.z = clampZ((camera.position.z * lastPinchD) / d);
+    lastPinchD = d;
+    return;
+  }
   if (!dragging) return;
   const now = performance.now();
   const dt = Math.max(now - lastT, 1) / 1000;
@@ -482,7 +560,23 @@ canvas.addEventListener('pointermove', (e) => {
   lastT = now;
 });
 
+let pickT = 0;
+
 function endDrag(e) {
+  const wasPinched = pinched;
+  pointers.delete(e.pointerId);
+  lastPinchD = 0;
+  if (!pointers.size) pinched = false;
+  // a tap that didn't drag or pinch toggles the country under it
+  if (
+    e.type === 'pointerup' &&
+    !wasPinched &&
+    Math.hypot(e.clientX - downX, e.clientY - downY) < 6
+  ) {
+    const id = pickCountry(e.clientX, e.clientY);
+    selectedId = id === selectedId ? null : id;
+    applySelection();
+  }
   if (!dragging) return;
   dragging = false;
   canvas.classList.remove('dragging');
@@ -493,6 +587,16 @@ function endDrag(e) {
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 
+// wheel zoom (desktop counterpart of pinch)
+canvas.addEventListener(
+  'wheel',
+  (e) => {
+    e.preventDefault();
+    camera.position.z = clampZ(camera.position.z * (1 + e.deltaY * 0.0012));
+  },
+  { passive: false }
+);
+
 // ---------- labels: project line tips to screen, de-overlap, hide when behind ----------
 const tipW = new THREE.Vector3();
 const dirW = new THREE.Vector3();
@@ -502,6 +606,11 @@ function updateLabels() {
   const h = viewH();
   const shown = [];
   for (const a of anchors) {
+    // a selected country keeps only its own labels
+    if (selectedId && a.cid !== selectedId) {
+      a.el.style.opacity = '0';
+      continue;
+    }
     dirW.copy(a.dir).transformDirection(spin.matrixWorld);
     if (dirW.z < 0.12) {
       a.el.style.opacity = '0';
@@ -511,8 +620,9 @@ function updateLabels() {
     a.x = ((tipW.x + 1) / 2) * w;
     a.y = ((1 - tipW.y) / 2) * h;
     a.fade = Math.min(1, (dirW.z - 0.12) * 4);
+    if (!a.w) a.w = a.el.offsetWidth; // cache — offsetWidth forces layout every read
     // keep the whole label inside the viewport
-    const halfW = a.el.offsetWidth / 2 + 10;
+    const halfW = a.w / 2 + 10;
     a.x = Math.min(Math.max(a.x, halfW), w - halfW);
     a.y = Math.min(Math.max(a.y, 24), h - 12);
     shown.push(a);
@@ -528,13 +638,13 @@ function updateLabels() {
     if (!group.length) continue;
     // narrow screens can't fit two columns — everything pins to the edge
     const singleLane = w < 560;
-    const maxW = Math.max(...group.map((a) => a.el.offsetWidth));
+    const maxW = Math.max(...group.map((a) => a.w));
     const lanes = singleLane ? [1] : [0, 1];
     for (const lane of lanes) {
       const items = singleLane ? group : group.filter((_, i) => i % 2 === lane);
       for (let i = 0; i < items.length; i++) {
         const a = items[i];
-        const halfW = a.el.offsetWidth / 2;
+        const halfW = a.w / 2;
         if (isRight) {
           a.x =
             lane === 1 ? w - 10 - halfW : Math.min(a.x, w - 25 - maxW - halfW);
@@ -549,10 +659,13 @@ function updateLabels() {
     }
   }
   for (const a of shown) {
-    a.el.style.opacity = (a.fade * 0.9).toFixed(2);
-    a.el.style.transform = `translate(${a.x.toFixed(1)}px, ${a.y.toFixed(
-      1
-    )}px) translate(-50%, -130%)`;
+    const op = (a.fade * 0.9).toFixed(2);
+    const tx = `translate(${a.x.toFixed(1)}px, ${a.y.toFixed(1)}px) translate(-50%, -130%)`;
+    // only touch the DOM when something actually changed
+    if (op !== a.op) a.el.style.opacity = op;
+    if (tx !== a.tx) a.el.style.transform = tx;
+    a.op = op;
+    a.tx = tx;
   }
 }
 
@@ -563,12 +676,37 @@ function resize() {
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  cityMat.uniforms.uHeight.value = renderer.getDrawingBufferSize(
-    new THREE.Vector2()
-  ).y;
+  const dbh = renderer.getDrawingBufferSize(new THREE.Vector2()).y;
+  for (const g of countryGroups) g.pointMat.uniforms.uHeight.value = dbh;
+  for (const a of anchors) a.w = 0; // re-measure label widths on next frame
 }
 window.addEventListener('resize', resize);
 resize();
+
+// debug: ?pick=x,y synthesizes a click at those client coords
+if (view.has('pick')) {
+  const [px, py] = view.get('pick').split(',').map(Number);
+  selectedId = pickCountry(px, py);
+  applySelection();
+  if (view.has('pickdebug')) {
+    ndc.set((px / viewW()) * 2 - 1, -((py / viewH()) * 2 - 1));
+    raycaster.setFromCamera(ndc, camera);
+    const hit = raycaster.intersectObject(globe, false)[0];
+    let dbg = `pick ${px},${py} -> id=${selectedId}`;
+    if (hit) {
+      const v = globe.worldToLocal(hit.point.clone()).normalize();
+      const lat = 90 - (Math.acos(Math.min(1, Math.max(-1, v.y))) * 180) / Math.PI;
+      let lon = (Math.atan2(v.z, -v.x) * 180) / Math.PI - 180;
+      if (lon < -180) lon += 360;
+      dbg += ` lat=${lat.toFixed(1)} lon=${lon.toFixed(1)}`;
+    } else dbg += ' nohit';
+    const div = document.createElement('div');
+    div.style.cssText =
+      'position:fixed;top:8px;left:8px;color:#0f0;font:14px monospace;z-index:99;background:#000';
+    div.textContent = dbg;
+    document.body.appendChild(div);
+  }
+}
 
 let prev = performance.now();
 let firstFrame = false;
