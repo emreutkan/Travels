@@ -20,8 +20,8 @@ const VISITED = {
 };
 
 // ---------- equirectangular texture: dark world, flags clipped to countries ----------
-const TEX_W = 4096;
-const TEX_H = 2048;
+const TEX_W = 8192;
+const TEX_H = 4096;
 const texCanvas = document.createElement('canvas');
 texCanvas.width = TEX_W;
 texCanvas.height = TEX_H;
@@ -85,7 +85,7 @@ function paint() {
   }
   // country borders over everything
   texCtx.strokeStyle = 'rgba(255,255,255,0.85)';
-  texCtx.lineWidth = 1.6;
+  texCtx.lineWidth = 3.2;
   texCtx.beginPath();
   path(borders);
   texCtx.stroke();
