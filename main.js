@@ -20,7 +20,7 @@ const VISITED = {
   '070': 'ba', // Bosnia and Herzegovina
   300: 'gr', // Greece
   792: 'tr', // Turkey
-  196: 'cy', // Cyprus
+  196: 'nc', // Cyprus -> painted as KKTC (north of the Green Line)
 };
 
 // ---------- equirectangular texture: dark world, flags clipped to countries ----------
@@ -46,8 +46,48 @@ const texture = new THREE.CanvasTexture(texCanvas);
 texture.colorSpace = THREE.SRGBColorSpace;
 texture.anisotropy = 8;
 
-const flagImgs = {};
+// KKTC flag — not an ISO country, drawn procedurally:
+// white field, two red horizontal bands, red crescent + star centred
+function makeKktcFlag() {
+  const c = document.createElement('canvas');
+  c.width = 300;
+  c.height = 200;
+  const x = c.getContext('2d');
+  const G = 200;
+  x.fillStyle = '#fff';
+  x.fillRect(0, 0, 300, 200);
+  x.fillStyle = '#E30A17';
+  x.fillRect(0, G * 0.05, 300, G * 0.15);
+  x.fillRect(0, G * 0.8, 300, G * 0.15);
+  const cx = 0.75 * G;
+  const cy = 0.5 * G;
+  x.beginPath();
+  x.arc(cx, cy, 0.24 * G, 0, Math.PI * 2);
+  x.fill();
+  x.fillStyle = '#fff';
+  x.beginPath();
+  x.arc(cx + 0.055 * G, cy, 0.2 * G, 0, Math.PI * 2);
+  x.fill();
+  x.fillStyle = '#E30A17';
+  x.beginPath();
+  const sr = 0.115 * G;
+  const sx0 = cx + 0.31 * G;
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? sr : sr * 0.382;
+    const a = Math.PI + (Math.PI / 5) * i;
+    const px = sx0 + r * Math.cos(a);
+    const py = cy - r * Math.sin(a);
+    if (i === 0) x.moveTo(px, py);
+    else x.lineTo(px, py);
+  }
+  x.closePath();
+  x.fill();
+  return c;
+}
+
+const flagImgs = { nc: makeKktcFlag() };
 for (const code of new Set(Object.values(VISITED))) {
+  if (code === 'nc') continue;
   const img = new Image();
   img.src = `/flags/${code}.png`;
   img.onload = paint;
@@ -68,7 +108,11 @@ function paint() {
   for (const f of countries.features) {
     const code = VISITED[f.id];
     const img = code && flagImgs[code];
-    if (!img || !img.complete || !img.naturalWidth) continue;
+    if (!img) continue;
+    if (!(img instanceof HTMLCanvasElement) && !(img.complete && img.naturalWidth))
+      continue;
+    // KKTC only — clip Cyprus to north of the Green Line (~35.16°N)
+    const greenLinePy = ((90 - 35.16) / 180) * TEX_H;
     const polys =
       f.geometry.type === 'MultiPolygon'
         ? f.geometry.coordinates
@@ -90,6 +134,11 @@ function paint() {
       texCtx.beginPath();
       path(poly);
       texCtx.clip();
+      if (f.id === '196') {
+        texCtx.beginPath();
+        texCtx.rect(x0, y0, x1 - x0, Math.max(0, greenLinePy - y0));
+        texCtx.clip();
+      }
       texCtx.drawImage(img, x0, y0, x1 - x0, y1 - y0);
       texCtx.restore();
     }
@@ -208,62 +257,67 @@ function dirFromLatLon(lat, lon) {
   );
 }
 
-// one city per visited country, chained as a journey
-const CITIES = [
-  ['New York', 40.71, -74.01],
-  ['Madrid', 40.42, -3.7],
-  ['Paris', 48.86, 2.35],
-  ['Zurich', 47.38, 8.54],
-  ['Monaco', 43.74, 7.42],
-  ['Rome', 41.9, 12.5],
-  ['Vienna', 48.21, 16.37],
-  ['Prague', 50.08, 14.44],
-  ['Budapest', 47.5, 19.04],
-  ['Sarajevo', 43.86, 18.41],
-  ['Athens', 37.98, 23.73],
-  ['Istanbul', 41.01, 28.98],
-  ['Nicosia', 35.19, 33.38],
+// ---------- leader lines pulled out from each visited city ----------
+// [label, lat, lon, years] — one line pulled out per year
+const ENTRIES = [
+  ['Türkiye, İzmir', 38.42, 27.14, ['born 2001']],
+  ['Greece, Chios', 38.37, 26.06, ['2015']],
+  ['KKTC', 35.2, 33.35, ['2019']],
+  ['Bosnia and Herz., Sarajevo', 43.86, 18.41, ['2024']],
+  ['United States, New Jersey', 40.06, -74.41, ['2024']],
+  ['United States, New York City', 40.71, -74.01, ['2024']],
+  ['United States, Miami', 25.76, -80.19, ['2024']],
+  ['United States, California', 36.78, -119.42, ['2024']],
+  ['Austria, Vienna', 48.21, 16.37, ['2025']],
+  ['Czech Republic, Prague', 50.08, 14.44, ['2025']],
+  ['Italy, Naples', 40.85, 14.27, ['2024', '2025']],
 ];
 
-const routeVerts = [];
-for (let i = 0; i < CITIES.length - 1; i++) {
-  const a = dirFromLatLon(CITIES[i][1], CITIES[i][2]);
-  const b = dirFromLatLon(CITIES[i + 1][1], CITIES[i + 1][2]);
-  const angle = a.angleTo(b);
-  const lift = 0.02 + angle * 0.1;
-  const steps = 64;
-  const slerp = new THREE.Vector3();
-  for (let s = 0; s < steps; s++) {
-    const t0 = s / steps;
-    const t1 = (s + 1) / steps;
-    for (const t of [t0, t1]) {
-      slerp.copy(a).lerp(b, t).normalize();
-      const r = R + 0.004 + lift * Math.sin(Math.PI * t);
-      routeVerts.push(slerp.x * r, slerp.y * r, slerp.z * r);
-    }
-  }
-}
-const routeGeo = new THREE.BufferGeometry();
-routeGeo.setAttribute(
-  'position',
-  new THREE.Float32BufferAttribute(routeVerts, 3)
-);
-const routes = new THREE.LineSegments(
-  routeGeo,
-  new THREE.LineBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.55,
-  })
-);
-spin.add(routes);
+const labelLayer = document.createElement('div');
+labelLayer.id = 'labels';
+document.body.appendChild(labelLayer);
 
-// marker dot at each city — same shader trick as before
+const lineVerts = [];
+const anchors = []; // {dir, tip, el}
+let slot = 0;
+for (const [name, lat, lon, years] of ENTRIES) {
+  const dir = dirFromLatLon(lat, lon);
+  years.forEach((year, j) => {
+    // stagger line lengths so nearby labels fan out instead of stacking
+    const len = 0.09 + (slot % 5) * 0.05 + j * 0.06;
+    const base = dir.clone().multiplyScalar(R + 0.005);
+    const tip = dir.clone().multiplyScalar(R + 0.005 + len);
+    lineVerts.push(base.x, base.y, base.z, tip.x, tip.y, tip.z);
+    const el = document.createElement('div');
+    el.className = 'city-label';
+    el.innerHTML = `${name}<span class="cl-year">${year}</span>`;
+    labelLayer.appendChild(el);
+    anchors.push({ dir, tip, el, x: 0, y: 0, fade: 0 });
+    slot++;
+  });
+}
+const leaderGeo = new THREE.BufferGeometry();
+leaderGeo.setAttribute(
+  'position',
+  new THREE.Float32BufferAttribute(lineVerts, 3)
+);
+spin.add(
+  new THREE.LineSegments(
+    leaderGeo,
+    new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.45,
+    })
+  )
+);
+
+// marker dot at each entry location — same shader trick as before
 const cityGeo = new THREE.BufferGeometry();
 cityGeo.setAttribute(
   'position',
   new THREE.Float32BufferAttribute(
-    CITIES.flatMap(([, lat, lon]) => {
+    ENTRIES.flatMap(([, lat, lon]) => {
       const d = dirFromLatLon(lat, lon);
       return [d.x * (R + 0.005), d.y * (R + 0.005), d.z * (R + 0.005)];
     }),
@@ -271,7 +325,7 @@ cityGeo.setAttribute(
   )
 );
 const cityMat = new THREE.ShaderMaterial({
-  uniforms: { uSize: { value: 0.014 }, uHeight: { value: 1 } },
+  uniforms: { uSize: { value: 0.0105 }, uHeight: { value: 1 } },
   vertexShader: /* glsl */ `
     uniform float uSize;
     uniform float uHeight;
@@ -381,6 +435,50 @@ function updateCoords() {
   }
 }
 
+// ---------- labels: project line tips to screen, de-overlap, hide when behind ----------
+const tipW = new THREE.Vector3();
+const dirW = new THREE.Vector3();
+function updateLabels() {
+  spin.updateMatrixWorld();
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const shown = [];
+  for (const a of anchors) {
+    dirW.copy(a.dir).transformDirection(spin.matrixWorld);
+    if (dirW.z < 0.12) {
+      a.el.style.opacity = '0';
+      continue;
+    }
+    tipW.copy(a.tip).applyMatrix4(spin.matrixWorld).project(camera);
+    a.x = ((tipW.x + 1) / 2) * w;
+    a.y = ((1 - tipW.y) / 2) * h;
+    a.fade = Math.min(1, (dirW.z - 0.12) * 4);
+    // keep the whole label inside the viewport
+    const halfW = a.el.offsetWidth / 2 + 10;
+    a.x = Math.min(Math.max(a.x, halfW), w - halfW);
+    a.y = Math.min(Math.max(a.y, 24), h - 12);
+    shown.push(a);
+  }
+  // push apart labels that collide (sorted by screen y)
+  shown.sort((p, q) => p.y - q.y);
+  const GAP = 15;
+  for (let i = 0; i < shown.length; i++) {
+    const a = shown[i];
+    for (let j = 0; j < i; j++) {
+      const b = shown[j];
+      const xOverlap =
+        Math.abs(a.x - b.x) < (a.el.offsetWidth + b.el.offsetWidth) / 2 + 8;
+      if (xOverlap && a.y < b.y + GAP) a.y = Math.min(b.y + GAP, h - 12);
+    }
+  }
+  for (const a of shown) {
+    a.el.style.opacity = (a.fade * 0.9).toFixed(2);
+    a.el.style.transform = `translate(${a.x.toFixed(1)}px, ${a.y.toFixed(
+      1
+    )}px) translate(-50%, -130%)`;
+  }
+}
+
 // ---------- resize / loop ----------
 function resize() {
   const w = window.innerWidth;
@@ -417,6 +515,7 @@ function tick(now) {
 
   updateCoords();
   renderer.render(scene, camera);
+  updateLabels();
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
