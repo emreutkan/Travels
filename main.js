@@ -13,6 +13,8 @@ const VISITED = {
   250: 'fr', // France
   380: 'it', // Italy
   348: 'hu', // Hungary
+  '040': 'at', // Austria
+  203: 'cz', // Czechia
   '070': 'ba', // Bosnia and Herzegovina
   300: 'gr', // Greece
   792: 'tr', // Turkey
@@ -54,8 +56,8 @@ function paint() {
   // ocean
   texCtx.fillStyle = '#060606';
   texCtx.fillRect(0, 0, TEX_W, TEX_H);
-  // land, slightly lifted from the ocean
-  texCtx.fillStyle = '#111111';
+  // land, barely lifted from the ocean — borders carry the shape
+  texCtx.fillStyle = '#0b0b0b';
   texCtx.beginPath();
   path(countries);
   texCtx.fill();
@@ -69,12 +71,19 @@ function paint() {
       f.geometry.type === 'MultiPolygon'
         ? f.geometry.coordinates
         : [f.geometry.coordinates];
-    for (const coords of polys) {
+    const polysWithBounds = polys.map((coords) => {
       const poly = {
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: coords },
       };
       const [[x0, y0], [x1, y1]] = path.bounds(poly);
+      return { poly, bounds: [x0, y0, x1, y1], area: (x1 - x0) * (y1 - y0) };
+    });
+    const maxArea = Math.max(...polysWithBounds.map((p) => p.area));
+    for (const { poly, bounds, area } of polysWithBounds) {
+      // skip far-flung specks (French Guiana et al.) — flag stays on the homeland
+      if (area < maxArea * 0.2) continue;
+      const [x0, y0, x1, y1] = bounds;
       texCtx.save();
       texCtx.beginPath();
       path(poly);
@@ -85,7 +94,7 @@ function paint() {
   }
   // country borders over everything
   texCtx.strokeStyle = 'rgba(255,255,255,0.85)';
-  texCtx.lineWidth = 3.2;
+  texCtx.lineWidth = 2.4;
   texCtx.beginPath();
   path(borders);
   texCtx.stroke();
@@ -112,7 +121,7 @@ if (view.has('still')) {
     .querySelectorAll('.hud')
     .forEach((el) => (el.style.animation = 'none'));
 }
-camera.position.z = parseFloat(view.get('zoom') ?? '2.85');
+camera.position.z = parseFloat(view.get('zoom') ?? '3.3');
 
 const globe = new THREE.Mesh(
   new THREE.SphereGeometry(R, 128, 128),
@@ -169,15 +178,15 @@ const rim = new THREE.Mesh(
       varying vec3 vNormal;
       varying vec3 vView;
       void main() {
-        float f = pow(1.0 - abs(dot(normalize(vNormal), normalize(vView))), 4.0);
-        gl_FragColor = vec4(vec3(1.0), f * 0.32);
+        float f = pow(1.0 - abs(dot(normalize(vNormal), normalize(vView))), 5.0);
+        gl_FragColor = vec4(vec3(1.0), f * 0.4);
       }
     `,
   })
 );
 
 const tilt = new THREE.Group();
-tilt.rotation.z = -0.22;
+tilt.rotation.z = -0.07;
 const spin = new THREE.Group();
 spin.add(globe, graticule, rim);
 tilt.add(spin);
@@ -186,8 +195,8 @@ scene.add(tilt);
 // open on the Mediterranean like the reference (override with ?lon=&lat=)
 // (texture lon 0 sits on +X and world-facing +Z shows lon 90°W, so the
 //  Y-rotation that brings lon L to the front is -90 - L)
-const faceLon = parseFloat(view.get('lon') ?? '12');
-const faceLat = parseFloat(view.get('lat') ?? '32');
+const faceLon = parseFloat(view.get('lon') ?? '-22');
+const faceLat = parseFloat(view.get('lat') ?? '36');
 spin.quaternion
   .setFromAxisAngle(
     new THREE.Vector3(0, 1, 0),
