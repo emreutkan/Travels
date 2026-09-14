@@ -3,19 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Travels</title>
+    <title>My Travels</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <canvas id="scene" aria-label="Interactive globe"></canvas>
-    <header class="hud hud-top">
-      <span class="hud-title">Travels</span>
-      <span class="hud-sub">Earth · 001</span>
+    <header class="hud hud-left">
+      <h1 class="hud-title">My Travels</h1>
+      <p id="coords" class="hud-mono">—</p>
     </header>
-    <footer class="hud hud-bottom">
-      <span id="coords" class="hud-mono">—</span>
-      <span class="hud-sub">Drag to rotate</span>
-    </footer>
+    <nav class="hud hud-right">
+      <a href="#">Places</a>
+      <a href="#">People</a>
+      <a href="#">Memories</a>
+      <a href="#" class="nav-next">Next</a>
+    </nav>
     <script type="module" src="/main.js"></script>
   </body>
 </html>

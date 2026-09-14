@@ -56,44 +56,58 @@ body::after {
 
 .hud {
   position: fixed;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 28px 32px;
-  pointer-events: none;
+  top: 0;
+  padding: 30px 34px;
   user-select: none;
   color: #fff;
   animation: fade-in 1.4s ease-out 0.2s both;
+  z-index: 1;
 }
 
-.hud-top {
-  top: 0;
+.hud-left {
+  left: 0;
 }
 
-.hud-bottom {
-  bottom: 0;
+.hud-right {
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
 }
 
 .hud-title {
   font-size: 13px;
+  font-weight: 400;
   letter-spacing: 0.42em;
   text-transform: uppercase;
 }
 
-.hud-sub {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.38);
-}
-
 .hud-mono {
+  margin-top: 14px;
   font-size: 11px;
-  letter-spacing: 0.14em;
+  line-height: 1.7;
+  letter-spacing: 0.12em;
   color: rgba(255, 255, 255, 0.55);
   font-variant-numeric: tabular-nums;
+}
+
+.hud-right a {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.hud-right a:hover {
+  color: #fff;
+}
+
+.nav-next {
+  margin-top: 18px;
+  color: rgba(255, 255, 255, 0.8);
 }
 
 @media (max-width: 560px) {
