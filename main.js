@@ -190,11 +190,107 @@ const rim = new THREE.Mesh(
 const tilt = new THREE.Group();
 tilt.rotation.z = -0.07;
 // drop the disc below frame centre so the bottom edge sits around the equator
-tilt.position.y = -parseFloat(view.get('yoff') ?? '0.55');
+tilt.position.y = -parseFloat(view.get('yoff') ?? '0.65');
 const spin = new THREE.Group();
 spin.add(globe, graticule, rim);
 tilt.add(spin);
 scene.add(tilt);
+
+// ---------- route arcs between visited cities ----------
+// texture-space: direction for lat/lon on the equirect sphere
+function dirFromLatLon(lat, lon) {
+  const theta = ((90 - lat) * Math.PI) / 180;
+  const phi = ((lon + 180) * Math.PI) / 180;
+  return new THREE.Vector3(
+    -Math.cos(phi) * Math.sin(theta),
+    Math.cos(theta),
+    Math.sin(phi) * Math.sin(theta)
+  );
+}
+
+// one city per visited country, chained as a journey
+const CITIES = [
+  ['New York', 40.71, -74.01],
+  ['Madrid', 40.42, -3.7],
+  ['Paris', 48.86, 2.35],
+  ['Zurich', 47.38, 8.54],
+  ['Monaco', 43.74, 7.42],
+  ['Rome', 41.9, 12.5],
+  ['Vienna', 48.21, 16.37],
+  ['Prague', 50.08, 14.44],
+  ['Budapest', 47.5, 19.04],
+  ['Sarajevo', 43.86, 18.41],
+  ['Athens', 37.98, 23.73],
+  ['Istanbul', 41.01, 28.98],
+  ['Nicosia', 35.19, 33.38],
+];
+
+const routeVerts = [];
+for (let i = 0; i < CITIES.length - 1; i++) {
+  const a = dirFromLatLon(CITIES[i][1], CITIES[i][2]);
+  const b = dirFromLatLon(CITIES[i + 1][1], CITIES[i + 1][2]);
+  const angle = a.angleTo(b);
+  const lift = 0.02 + angle * 0.1;
+  const steps = 64;
+  const slerp = new THREE.Vector3();
+  for (let s = 0; s < steps; s++) {
+    const t0 = s / steps;
+    const t1 = (s + 1) / steps;
+    for (const t of [t0, t1]) {
+      slerp.copy(a).lerp(b, t).normalize();
+      const r = R + 0.004 + lift * Math.sin(Math.PI * t);
+      routeVerts.push(slerp.x * r, slerp.y * r, slerp.z * r);
+    }
+  }
+}
+const routeGeo = new THREE.BufferGeometry();
+routeGeo.setAttribute(
+  'position',
+  new THREE.Float32BufferAttribute(routeVerts, 3)
+);
+const routes = new THREE.LineSegments(
+  routeGeo,
+  new THREE.LineBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.55,
+  })
+);
+spin.add(routes);
+
+// marker dot at each city — same shader trick as before
+const cityGeo = new THREE.BufferGeometry();
+cityGeo.setAttribute(
+  'position',
+  new THREE.Float32BufferAttribute(
+    CITIES.flatMap(([, lat, lon]) => {
+      const d = dirFromLatLon(lat, lon);
+      return [d.x * (R + 0.005), d.y * (R + 0.005), d.z * (R + 0.005)];
+    }),
+    3
+  )
+);
+const cityMat = new THREE.ShaderMaterial({
+  uniforms: { uSize: { value: 0.014 }, uHeight: { value: 1 } },
+  vertexShader: /* glsl */ `
+    uniform float uSize;
+    uniform float uHeight;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = uSize * uHeight * projectionMatrix[1][1] * 0.5 / -mv.z;
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    void main() {
+      vec2 c = gl_PointCoord - 0.5;
+      float d = length(c);
+      if (d > 0.5) discard;
+      gl_FragColor = vec4(1.0);
+    }
+  `,
+});
+spin.add(new THREE.Points(cityGeo, cityMat));
 
 // open on the Mediterranean like the reference (override with ?lon=&lat=)
 // (texture lon 0 sits on +X and world-facing +Z shows lon 90°W, so the
@@ -292,6 +388,9 @@ function resize() {
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  cityMat.uniforms.uHeight.value = renderer.getDrawingBufferSize(
+    new THREE.Vector2()
+  ).y;
 }
 window.addEventListener('resize', resize);
 resize();
