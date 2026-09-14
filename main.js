@@ -271,6 +271,18 @@ const ENTRIES = [
   ['Austria, Vienna', 48.21, 16.37, ['2025']],
   ['Czech Republic, Prague', 50.08, 14.44, ['2025']],
   ['Italy, Naples', 40.85, 14.27, ['2024', '2025']],
+  ['Italy, Florence', 43.77, 11.25, ['2024', '2025']],
+  ['Italy, Pisa', 43.72, 10.4, ['2025']],
+  ['Italy, Siena', 43.32, 11.33, ['2025']],
+  ['Italy, Rome', 41.9, 12.5, ['2024', '2025']],
+  ['Italy, Venice', 45.44, 12.34, ['2024', '2025']],
+  ['Italy, Verona', 45.44, 10.99, ['2024', '2025']],
+  ['Italy, Lake Garda', 45.6, 10.55, ['2024', '2025']],
+  ['Italy, Milan', 45.46, 9.19, ['2023', '2024', '2025']],
+  ['Italy, Genova', 44.41, 8.93, ['2023']],
+  ['Monaco, Monte-Carlo', 43.74, 7.42, ['2023']],
+  ['Spain, Barcelona', 41.39, 2.17, ['2025']],
+  ['Hungary, Budapest', 47.5, 19.04, ['2024', '2025']],
 ];
 
 const labelLayer = document.createElement('div');
@@ -284,7 +296,7 @@ for (const [name, lat, lon, years] of ENTRIES) {
   const dir = dirFromLatLon(lat, lon);
   years.forEach((year, j) => {
     // stagger line lengths so nearby labels fan out instead of stacking
-    const len = 0.09 + (slot % 5) * 0.05 + j * 0.06;
+    const len = 0.1 + (slot % 6) * 0.06 + j * 0.07;
     const base = dir.clone().multiplyScalar(R + 0.005);
     const tip = dir.clone().multiplyScalar(R + 0.005 + len);
     lineVerts.push(base.x, base.y, base.z, tip.x, tip.y, tip.z);
@@ -459,16 +471,33 @@ function updateLabels() {
     a.y = Math.min(Math.max(a.y, 24), h - 12);
     shown.push(a);
   }
-  // push apart labels that collide (sorted by screen y)
-  shown.sort((p, q) => p.y - q.y);
+  // dense clusters stack deep — split each side into two lanes:
+  // even labels float at their line tip, odd ones pin to the edge column
   const GAP = 15;
-  for (let i = 0; i < shown.length; i++) {
-    const a = shown[i];
-    for (let j = 0; j < i; j++) {
-      const b = shown[j];
-      const xOverlap =
-        Math.abs(a.x - b.x) < (a.el.offsetWidth + b.el.offsetWidth) / 2 + 8;
-      if (xOverlap && a.y < b.y + GAP) a.y = Math.min(b.y + GAP, h - 12);
+  for (const side of ['left', 'right']) {
+    const isRight = side === 'right';
+    const group = shown
+      .filter((a) => (a.x < w / 2) !== isRight)
+      .sort((p, q) => p.y - q.y);
+    if (!group.length) continue;
+    // edge column width = widest label, so the floating lane can clear it
+    const maxW = Math.max(...group.map((a) => a.el.offsetWidth));
+    for (const lane of [0, 1]) {
+      const items = group.filter((_, i) => i % 2 === lane);
+      for (let i = 0; i < items.length; i++) {
+        const a = items[i];
+        const halfW = a.el.offsetWidth / 2;
+        if (isRight) {
+          a.x =
+            lane === 1 ? w - 10 - halfW : Math.min(a.x, w - 25 - maxW - halfW);
+        } else {
+          a.x =
+            lane === 1 ? 10 + halfW : Math.max(a.x, 25 + maxW + halfW);
+        }
+        if (i > 0 && a.y < items[i - 1].y + GAP) {
+          a.y = Math.min(items[i - 1].y + GAP, h - 12);
+        }
+      }
     }
   }
   for (const a of shown) {
