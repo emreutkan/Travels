@@ -1,10 +1,41 @@
 import * as THREE from 'three';
 import { geoEquirectangular, geoPath, geoGraticule10 } from 'd3-geo';
 import { feature, mesh } from 'topojson-client';
-import countriesTopo from './countries-50m.json';
 
 const BG = 0x050505;
 const R = 1;
+
+// ---------- real loading progress (0-55: country data, 55-95: flags, 100: first frame) ----------
+const P = window.__tp;
+P.target = 2;
+
+let countriesTopo;
+try {
+  const resp = await fetch('/countries-50m.json');
+  const total = +resp.headers.get('content-length') || 1;
+  const reader = resp.body.getReader();
+  const chunks = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    got += value.length;
+    P.target = 2 + (got / total) * 53;
+  }
+  const buf = new Uint8Array(got);
+  let off = 0;
+  for (const c of chunks) {
+    buf.set(c, off);
+    off += c.length;
+  }
+  countriesTopo = JSON.parse(new TextDecoder().decode(buf));
+} catch (e) {
+  // surface the failure on the loader instead of hanging at 30%
+  const num = document.getElementById('loader-num');
+  if (num) num.textContent = 'ERR';
+  throw e;
+}
 
 // visited countries: ISO numeric id -> flag file in /public/flags
 const VISITED = {
@@ -86,11 +117,22 @@ function makeKktcFlag() {
 }
 
 const flagImgs = { nc: makeKktcFlag() };
-for (const code of new Set(Object.values(VISITED))) {
-  if (code === 'nc') continue;
+const flagCodes = [...new Set(Object.values(VISITED))].filter(
+  (c) => c !== 'nc'
+);
+let flagsDone = 0;
+for (const code of flagCodes) {
   const img = new Image();
   img.src = `/flags/${code}.png`;
-  img.onload = paint;
+  const done = () => {
+    flagsDone++;
+    P.target = 55 + (flagsDone / flagCodes.length) * 40;
+  };
+  img.onload = () => {
+    done();
+    paint();
+  };
+  img.onerror = done;
   flagImgs[code] = img;
 }
 
@@ -154,12 +196,15 @@ function paint() {
 paint();
 
 // ---------- scene ----------
+// transparent canvas so the giant TRAVELS headline behind stays occluded
+// only by the sphere itself
 const renderer = new THREE.WebGLRenderer({
   canvas: document.getElementById('scene'),
   antialias: true,
+  alpha: true,
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setClearColor(BG);
+renderer.setClearColor(BG, 0);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
@@ -167,12 +212,28 @@ const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
 const view = new URLSearchParams(location.search);
 if (view.has('still')) {
   // deterministic screenshots: skip the intro fade too
-  document.getElementById('scene').style.animation = 'none';
+  document.getElementById('scene').style.transition = 'none';
   document
-    .querySelectorAll('.hud')
-    .forEach((el) => (el.style.animation = 'none'));
+    .querySelectorAll('.hud, .bleed-title')
+    .forEach((el) => {
+      el.style.transition = 'none';
+      el.style.opacity = '1';
+    });
+  document.body.classList.add('ready');
 }
-camera.position.z = parseFloat(view.get('zoom') ?? '2.05');
+// viewport size — ?w=&h= overrides let screenshots emulate real devices
+const viewW = () =>
+  parseFloat(view.get('w')) ||
+  Math.min(innerWidth, document.documentElement.clientWidth);
+const viewH = () =>
+  parseFloat(view.get('h')) ||
+  Math.min(innerHeight, document.documentElement.clientHeight);
+
+// portrait phones: pull back so the disc still overflows the frame width
+const portrait = viewW() < viewH() && viewW() < 760;
+camera.position.z = parseFloat(
+  view.get('zoom') ?? (portrait ? '3.2' : '2.05')
+);
 
 const globe = new THREE.Mesh(
   new THREE.SphereGeometry(R, 128, 128),
@@ -239,7 +300,9 @@ const rim = new THREE.Mesh(
 const tilt = new THREE.Group();
 tilt.rotation.z = -0.07;
 // drop the disc below frame centre so the bottom edge sits around the equator
-tilt.position.y = -parseFloat(view.get('yoff') ?? '0.65');
+tilt.position.y = -parseFloat(
+  view.get('yoff') ?? (portrait ? '0.8' : '0.65')
+);
 const spin = new THREE.Group();
 spin.add(globe, graticule, rim);
 tilt.add(spin);
@@ -362,8 +425,8 @@ spin.add(new THREE.Points(cityGeo, cityMat));
 // open on the Mediterranean like the reference (override with ?lon=&lat=)
 // (texture lon 0 sits on +X and world-facing +Z shows lon 90°W, so the
 //  Y-rotation that brings lon L to the front is -90 - L)
-const faceLon = parseFloat(view.get('lon') ?? '-30');
-const faceLat = parseFloat(view.get('lat') ?? '8');
+const faceLon = parseFloat(view.get('lon') ?? (portrait ? '14' : '-30'));
+const faceLat = parseFloat(view.get('lat') ?? (portrait ? '14' : '8'));
 spin.quaternion
   .setFromAxisAngle(
     new THREE.Vector3(0, 1, 0),
@@ -435,8 +498,8 @@ const tipW = new THREE.Vector3();
 const dirW = new THREE.Vector3();
 function updateLabels() {
   spin.updateMatrixWorld();
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  const w = viewW();
+  const h = viewH();
   const shown = [];
   for (const a of anchors) {
     dirW.copy(a.dir).transformDirection(spin.matrixWorld);
@@ -456,17 +519,19 @@ function updateLabels() {
   }
   // dense clusters stack deep — split each side into two lanes:
   // even labels float at their line tip, odd ones pin to the edge column
-  const GAP = 15;
+  const GAP = w < 560 ? 11 : 15;
   for (const side of ['left', 'right']) {
     const isRight = side === 'right';
     const group = shown
       .filter((a) => (a.x < w / 2) !== isRight)
       .sort((p, q) => p.y - q.y);
     if (!group.length) continue;
-    // edge column width = widest label, so the floating lane can clear it
+    // narrow screens can't fit two columns — everything pins to the edge
+    const singleLane = w < 560;
     const maxW = Math.max(...group.map((a) => a.el.offsetWidth));
-    for (const lane of [0, 1]) {
-      const items = group.filter((_, i) => i % 2 === lane);
+    const lanes = singleLane ? [1] : [0, 1];
+    for (const lane of lanes) {
+      const items = singleLane ? group : group.filter((_, i) => i % 2 === lane);
       for (let i = 0; i < items.length; i++) {
         const a = items[i];
         const halfW = a.el.offsetWidth / 2;
@@ -493,8 +558,8 @@ function updateLabels() {
 
 // ---------- resize / loop ----------
 function resize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  const w = viewW();
+  const h = viewH();
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -506,6 +571,7 @@ window.addEventListener('resize', resize);
 resize();
 
 let prev = performance.now();
+let firstFrame = false;
 function tick(now) {
   const dt = Math.min((now - prev) / 1000, 0.05);
   prev = now;
@@ -527,6 +593,10 @@ function tick(now) {
 
   renderer.render(scene, camera);
   updateLabels();
+  if (!firstFrame) {
+    firstFrame = true;
+    P.target = 100; // loader finishes counting, curtain reveals
+  }
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);

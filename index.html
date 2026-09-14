@@ -7,10 +7,55 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
+    <h1 class="bleed-title" aria-hidden="true">Travels</h1>
     <canvas id="scene" aria-label="Interactive globe"></canvas>
     <header class="hud hud-left">
       <h1 class="hud-title">Travels</h1>
     </header>
+    <div id="loader" aria-hidden="true">
+      <span class="loader-tag">Travels</span>
+      <span id="loader-num">0</span>
+      <div class="loader-bar"><span id="loader-fill"></span></div>
+    </div>
+    <script>
+      // progress counter: eases toward __tp.target — main.js publishes real
+      // milestones (country data bytes, flag images, first frame)
+      (function () {
+        var P = (window.__tp = { target: 0, shown: 0 });
+        var loader = document.getElementById('loader');
+        if (new URLSearchParams(location.search).has('still')) {
+          loader.remove();
+          document.body.classList.add('ready');
+          return;
+        }
+        var num = document.getElementById('loader-num');
+        var fill = document.getElementById('loader-fill');
+        var fast = new URLSearchParams(location.search).has('fast');
+        var last = performance.now();
+        requestAnimationFrame(function step(now) {
+          var dt = Math.min((now - last) / 1000, 0.05);
+          last = now;
+          if (fast) P.target = 100; // debug: force the reveal
+          // while the bundle is still downloading, creep toward 30
+          if (P.target === 0 && P.shown < 30)
+            P.shown += (30 - P.shown) * dt * 0.6;
+          P.shown += (P.target - P.shown) * Math.min(1, dt * 5);
+          if (P.target >= 100 && P.shown > 99) P.shown = 100;
+          num.textContent = Math.round(P.shown);
+          loader.dataset.target = Math.round(P.target);
+          fill.style.transform = 'scaleX(' + P.shown / 100 + ')';
+          if (P.shown >= 100) {
+            document.body.classList.add('ready');
+            loader.classList.add('done');
+            setTimeout(function () {
+              loader.remove();
+            }, 1200);
+            return;
+          }
+          requestAnimationFrame(step);
+        });
+      })();
+    </script>
     <script type="module" src="/main.js"></script>
   </body>
 </html>

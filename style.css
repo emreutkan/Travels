@@ -25,7 +25,13 @@ body {
   height: 100%;
   display: block;
   cursor: grab;
-  animation: fade-in 1.4s ease-out both;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 1.2s ease-out 0.1s;
+}
+
+body.ready #scene {
+  opacity: 1;
 }
 
 #scene.dragging {
@@ -54,14 +60,112 @@ body::after {
   );
 }
 
+/* giant headline behind the globe — the transparent canvas only occludes
+   it where the sphere is, so letterforms ghost out at the edges */
+.bleed-title {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-9vh);
+  font-size: 19vw;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: transparent;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(255, 255, 255, 0.06) 48%,
+    rgba(255, 255, 255, 0.16) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: 0 0 90px rgba(255, 255, 255, 0.07);
+  pointer-events: none;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 1.8s ease-out 0.35s;
+}
+
+body.ready .bleed-title {
+  opacity: 1;
+}
+
+/* loader: big counter + hairline bar, curtain-lifts on done */
+#loader {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: #050505;
+  transition: transform 0.95s cubic-bezier(0.77, 0, 0.18, 1);
+}
+
+#loader.done {
+  transform: translateY(-101%);
+}
+
+.loader-tag {
+  position: absolute;
+  top: 30px;
+  left: 34px;
+  font-size: 11px;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+#loader-num {
+  position: absolute;
+  left: 30px;
+  bottom: 14px;
+  font-size: clamp(96px, 16vw, 190px);
+  font-weight: 100;
+  line-height: 1;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+#loader-num::after {
+  content: "%";
+  font-size: 0.26em;
+  margin-left: 0.15em;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.loader-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+#loader-fill {
+  display: block;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.85);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
 .hud {
   position: fixed;
   top: 0;
   padding: 30px 34px;
   user-select: none;
   color: #fff;
-  animation: fade-in 1.4s ease-out 0.2s both;
+  opacity: 0;
+  transition: opacity 1.4s ease-out 0.5s;
   z-index: 1;
+}
+
+body.ready .hud {
+  opacity: 1;
 }
 
 .hud-left {
@@ -104,5 +208,28 @@ body::after {
 @media (max-width: 560px) {
   .hud {
     padding: 20px;
+  }
+
+  .city-label {
+    font-size: 8.5px;
+    letter-spacing: 0.12em;
+  }
+
+  .bleed-title {
+    font-size: 26vw;
+    letter-spacing: 0.14em;
+    text-indent: 0.14em;
+    transform: translateY(-16vh);
+  }
+
+  .loader-tag {
+    top: 20px;
+    left: 20px;
+  }
+
+  #loader-num {
+    left: 20px;
+    bottom: 12px;
+    font-size: 30vw;
   }
 }
