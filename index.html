@@ -36,7 +36,9 @@
           // while the bundle is still downloading, creep toward 30
           if (P.target === 0 && P.shown < 30)
             P.shown += (30 - P.shown) * dt * 0.6;
-          P.shown += (P.target - P.shown) * Math.min(1, dt * 5);
+          // faster tail once everything is actually done — no long sit at ~95
+          var k = P.target >= 100 ? 14 : 5;
+          P.shown += (P.target - P.shown) * Math.min(1, dt * k);
           if (P.target >= 100 && P.shown > 99) P.shown = 100;
           num.textContent = Math.round(P.shown);
           loader.dataset.target = Math.round(P.target);

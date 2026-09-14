@@ -133,9 +133,10 @@ for (const code of flagCodes) {
   };
   img.onload = () => {
     done();
-    // repaint once when all flags are in — repainting per flag re-uploads
-    // the 8K texture to the GPU every load and stutters the reveal
-    if (flagsDone === flagCodes.length) paint();
+    // repaint once when all flags are in — deferred so it doesn't block the
+    // first frame (each repaint re-uploads ~64MB of texture to the GPU;
+    // the curtain is still covering the screen while it happens)
+    if (flagsDone === flagCodes.length) setTimeout(paint, 0);
   };
   img.onerror = done;
   flagImgs[code] = img;
@@ -783,3 +784,8 @@ function tick(now) {
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
+// failsafe — if the first frame never lands (hidden tab suspends rAF,
+// a GPU hiccup, whatever), still let the loader finish
+setTimeout(() => {
+  P.target = Math.max(P.target, 100);
+}, 7000);
