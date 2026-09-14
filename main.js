@@ -318,6 +318,10 @@ spin.add(globe, graticule, rim);
 tilt.add(spin);
 scene.add(tilt);
 
+const baseTiltY = tilt.position.y;
+// sink the disc further while a country is selected — its lines get headroom
+const selTiltY = baseTiltY + (portrait ? 0.45 : 0.28);
+
 // ---------- route arcs between visited cities ----------
 // texture-space: direction for lat/lon on the equirect sphere
 function dirFromLatLon(lat, lon) {
@@ -469,6 +473,8 @@ let velX = 0;
 let idleTime = 0;
 
 const qTmp = new THREE.Quaternion();
+const qTmp2 = new THREE.Quaternion();
+const selQuat = new THREE.Quaternion();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 function applyWorldRotation(axis, angle) {
@@ -505,6 +511,18 @@ function applySelection() {
     g.pointMat.uniforms.uAlpha.value = dim ? 0.15 : 1;
   }
   paint(); // re-render the texture with unselected flags dimmed
+  if (selectedId) {
+    // aim a yaw at the selected country's city cluster so it ends up on top.
+    // yaw-only (about the pole axis) — the no-vertical-flip rule still holds
+    const d = new THREE.Vector3();
+    for (const e of ENTRIES) if (e[4] === selectedId) d.add(dirFromLatLon(e[1], e[2]));
+    d.normalize().applyQuaternion(spin.quaternion); // country dir, tilt space
+    qTmp2.copy(tilt.quaternion).invert();
+    const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(qTmp2); // camera dir, tilt space
+    const delta = Math.atan2(facing.x, facing.z) - Math.atan2(d.x, d.z);
+    selQuat.setFromAxisAngle(Y_AXIS, delta).multiply(spin.quaternion);
+  }
+  idleTime = 0; // auto-rotation eases back in smoothly on deselect
 }
 
 const clampZ = (z) => Math.min(Math.max(z, 1.55), 7);
@@ -636,21 +654,31 @@ function updateLabels() {
       .filter((a) => (a.x < w / 2) !== isRight)
       .sort((p, q) => p.y - q.y);
     if (!group.length) continue;
-    // narrow screens can't fit two columns — everything pins to the edge
+    // narrow screens can't fit two columns — everything pins to the edge;
+    // a selected country instead floats every label at its own line tip
     const singleLane = w < 560;
     const maxW = Math.max(...group.map((a) => a.w));
-    const lanes = singleLane ? [1] : [0, 1];
+    const lanes = selectedId ? [0] : singleLane ? [1] : [0, 1];
     for (const lane of lanes) {
-      const items = singleLane ? group : group.filter((_, i) => i % 2 === lane);
+      const items =
+        singleLane || selectedId ? group : group.filter((_, i) => i % 2 === lane);
       for (let i = 0; i < items.length; i++) {
         const a = items[i];
         const halfW = a.w / 2;
         if (isRight) {
           a.x =
-            lane === 1 ? w - 10 - halfW : Math.min(a.x, w - 25 - maxW - halfW);
+            lane === 1
+              ? w - 10 - halfW
+              : selectedId
+                ? a.x
+                : Math.min(a.x, w - 25 - maxW - halfW);
         } else {
           a.x =
-            lane === 1 ? 10 + halfW : Math.max(a.x, 25 + maxW + halfW);
+            lane === 1
+              ? 10 + halfW
+              : selectedId
+                ? a.x
+                : Math.max(a.x, 25 + maxW + halfW);
         }
         if (i > 0 && a.y < items[i - 1].y + GAP) {
           a.y = Math.min(items[i - 1].y + GAP, h - 12);
@@ -683,6 +711,14 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+// debug: ?sel=ID selects a country directly (bypasses the click raycast)
+if (view.has('sel')) {
+  selectedId = view.get('sel');
+  applySelection();
+  // snap to the aimed pose — screenshots don't wait for the slerp
+  spin.quaternion.copy(selQuat);
+  tilt.position.y = selTiltY;
+}
 // debug: ?pick=x,y synthesizes a click at those client coords
 if (view.has('pick')) {
   const [px, py] = view.get('pick').split(',').map(Number);
@@ -718,16 +754,25 @@ function tick(now) {
     // inertia decays exponentially after release
     const decay = Math.exp(-3.2 * dt);
     velX *= decay;
-    if (Math.abs(velX) > 1e-4) applyWorldRotation(Y_AXIS, velX * dt);
+    if (!selectedId && Math.abs(velX) > 1e-4)
+      applyWorldRotation(Y_AXIS, velX * dt);
 
-    // ease auto-rotation back in after the user lets go
     idleTime += dt;
-    if (!reducedMotion.matches && !view.has('still')) {
+    if (selectedId) {
+      // hold the selected country on top — no auto-rotation while selected
+      spin.quaternion.slerp(selQuat, 1 - Math.exp(-3.5 * dt));
+    } else if (!reducedMotion.matches && !view.has('still')) {
+      // ease auto-rotation back in after the user lets go
       const ease = Math.min(Math.max((idleTime - 0.8) / 1.6, 0), 1);
       qTmp.setFromAxisAngle(Y_AXIS, AUTO_SPEED * ease * ease * dt);
       spin.quaternion.multiply(qTmp); // local Y = tilted pole axis
     }
   }
+
+  // sink the disc while a country is selected so its lines fan up top
+  const tiltTarget = selectedId ? selTiltY : baseTiltY;
+  tilt.position.y +=
+    (tiltTarget - tilt.position.y) * (1 - Math.exp(-3.5 * dt));
 
   renderer.render(scene, camera);
   updateLabels();
