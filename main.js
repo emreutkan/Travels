@@ -283,6 +283,7 @@ const ENTRIES = [
   ['Monaco, Monte-Carlo', 43.74, 7.42, ['2023']],
   ['Spain, Barcelona', 41.39, 2.17, ['2025']],
   ['Hungary, Budapest', 47.5, 19.04, ['2024', '2025']],
+  ['Greece, Samos', 37.75, 26.9, ['2023']],
 ];
 
 const labelLayer = document.createElement('div');
@@ -429,24 +430,6 @@ function endDrag(e) {
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 
-// ---------- coordinates readout: lat/lon of the point facing the camera ----------
-const coordsEl = document.getElementById('coords');
-const invQ = new THREE.Quaternion();
-const faceDir = new THREE.Vector3();
-let coordText = '';
-function updateCoords() {
-  invQ.copy(spin.quaternion).invert();
-  faceDir.set(0, 0, 1).applyQuaternion(invQ);
-  const lat = (Math.asin(faceDir.y) * 180) / Math.PI;
-  let lon = (Math.atan2(faceDir.z, -faceDir.x) * 180) / Math.PI - 180;
-  if (lon < -180) lon += 360;
-  const text = `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}<br>${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`;
-  if (text !== coordText) {
-    coordText = text;
-    coordsEl.innerHTML = text;
-  }
-}
-
 // ---------- labels: project line tips to screen, de-overlap, hide when behind ----------
 const tipW = new THREE.Vector3();
 const dirW = new THREE.Vector3();
@@ -542,7 +525,6 @@ function tick(now) {
     }
   }
 
-  updateCoords();
   renderer.render(scene, camera);
   updateLabels();
   requestAnimationFrame(tick);
