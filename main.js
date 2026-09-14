@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { geoEquirectangular, geoPath, geoGraticule10 } from 'd3-geo';
 import { feature, mesh } from 'topojson-client';
-import countriesTopo from './countries-110m.json';
+import countriesTopo from './countries-50m.json';
 
 const BG = 0x050505;
 const R = 1;
@@ -11,6 +11,8 @@ const VISITED = {
   840: 'us', // United States
   724: 'es', // Spain
   250: 'fr', // France
+  756: 'ch', // Switzerland
+  492: 'mc', // Monaco
   380: 'it', // Italy
   348: 'hu', // Hungary
   '040': 'at', // Austria
@@ -219,11 +221,9 @@ let lastX = 0;
 let lastY = 0;
 let lastT = 0;
 let velX = 0;
-let velY = 0;
 let idleTime = 0;
 
 const qTmp = new THREE.Quaternion();
-const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 function applyWorldRotation(axis, angle) {
@@ -238,7 +238,7 @@ canvas.addEventListener('pointerdown', (e) => {
   lastX = e.clientX;
   lastY = e.clientY;
   lastT = performance.now();
-  velX = velY = 0;
+  velX = 0;
   idleTime = 0;
 });
 
@@ -247,11 +247,8 @@ canvas.addEventListener('pointermove', (e) => {
   const now = performance.now();
   const dt = Math.max(now - lastT, 1) / 1000;
   const dx = e.clientX - lastX;
-  const dy = e.clientY - lastY;
   applyWorldRotation(Y_AXIS, dx * DRAG_K);
-  applyWorldRotation(X_AXIS, dy * DRAG_K);
   velX = (dx * DRAG_K) / dt;
-  velY = (dy * DRAG_K) / dt;
   lastX = e.clientX;
   lastY = e.clientY;
   lastT = now;
@@ -306,9 +303,7 @@ function tick(now) {
     // inertia decays exponentially after release
     const decay = Math.exp(-3.2 * dt);
     velX *= decay;
-    velY *= decay;
     if (Math.abs(velX) > 1e-4) applyWorldRotation(Y_AXIS, velX * dt);
-    if (Math.abs(velY) > 1e-4) applyWorldRotation(X_AXIS, velY * dt);
 
     // ease auto-rotation back in after the user lets go
     idleTime += dt;
