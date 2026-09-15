@@ -476,6 +476,8 @@ let idleTime = 0;
 const qTmp = new THREE.Quaternion();
 const qTmp2 = new THREE.Quaternion();
 const selQuat = new THREE.Quaternion();
+const preSelQuat = new THREE.Quaternion(); // pose at click-time — restored on deselect
+let restoring = false;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 
@@ -513,7 +515,10 @@ function applySelection() {
     g.pointMat.uniforms.uAlpha.value = dim ? 0.15 : 1;
   }
   paint(); // re-render the texture with unselected flags dimmed
-  if (selectedId) {
+  if (!selectedId) {
+    restoring = true; // deselected — ease back to the pre-click pose
+  } else {
+    preSelQuat.copy(spin.quaternion);
     // swing the selected country's city cluster to the top of the view —
     // aimed by screen position: the sphere direction that renders at
     // top-centre (ndc y≈0.15) in the SUNK pose becomes the target
@@ -564,6 +569,7 @@ let downY = 0;
 
 canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  restoring = false; // user grabbing mid-restore takes over
   dragging = true;
   canvas.classList.add('dragging');
   canvas.setPointerCapture(e.pointerId);
@@ -802,13 +808,22 @@ function tick(now) {
     // inertia decays exponentially after release
     const decay = Math.exp(-3.2 * dt);
     velX *= decay;
-    if (!selectedId && Math.abs(velX) > 1e-4)
+    if (!selectedId && !restoring && Math.abs(velX) > 1e-4)
       applyWorldRotation(Y_AXIS, velX * dt);
 
     idleTime += dt;
+    const k = 1 - Math.exp(-3.5 * dt);
     if (selectedId) {
       // hold the selected country on top — no auto-rotation while selected
-      spin.quaternion.slerp(selQuat, 1 - Math.exp(-3.5 * dt));
+      spin.quaternion.slerp(selQuat, k);
+    } else if (restoring) {
+      // ease back to the pre-click pose, then resume normal rotation
+      spin.quaternion.slerp(preSelQuat, k);
+      if (spin.quaternion.angleTo(preSelQuat) < 0.005) {
+        spin.quaternion.copy(preSelQuat);
+        restoring = false;
+        idleTime = 0;
+      }
     } else if (!reducedMotion.matches && !view.has('still')) {
       // ease auto-rotation back in after the user lets go
       const ease = Math.min(Math.max((idleTime - 0.8) / 1.6, 0), 1);
