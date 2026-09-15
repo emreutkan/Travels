@@ -321,7 +321,7 @@ scene.add(tilt);
 
 const baseTiltY = tilt.position.y;
 // sink the disc further while a country is selected — its lines get headroom
-const selTiltY = baseTiltY + (portrait ? 0.45 : 0.28);
+const selTiltY = baseTiltY + (portrait ? 0.35 : 0.55);
 
 // ---------- route arcs between visited cities ----------
 // texture-space: direction for lat/lon on the equirect sphere
@@ -477,6 +477,7 @@ const qTmp = new THREE.Quaternion();
 const qTmp2 = new THREE.Quaternion();
 const selQuat = new THREE.Quaternion();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const X_AXIS = new THREE.Vector3(1, 0, 0);
 
 function applyWorldRotation(axis, angle) {
   qTmp.setFromAxisAngle(axis, angle);
@@ -513,15 +514,42 @@ function applySelection() {
   }
   paint(); // re-render the texture with unselected flags dimmed
   if (selectedId) {
-    // aim a yaw at the selected country's city cluster so it ends up on top.
-    // yaw-only (about the pole axis) — the no-vertical-flip rule still holds
+    // swing the selected country's city cluster to the top of the view —
+    // aimed by screen position: the sphere direction that renders at
+    // top-centre (ndc y≈0.15) in the SUNK pose becomes the target
     const d = new THREE.Vector3();
     for (const e of ENTRIES) if (e[4] === selectedId) d.add(dirFromLatLon(e[1], e[2]));
-    d.normalize().applyQuaternion(spin.quaternion); // country dir, tilt space
-    qTmp2.copy(tilt.quaternion).invert();
-    const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(qTmp2); // camera dir, tilt space
-    const delta = Math.atan2(facing.x, facing.z) - Math.atan2(d.x, d.z);
-    selQuat.setFromAxisAngle(Y_AXIS, delta).multiply(spin.quaternion);
+    d.normalize();
+    const v = d.clone().applyQuaternion(spin.quaternion); // tilt space, now
+
+    const prevY = tilt.position.y;
+    tilt.position.y = selTiltY;
+    camera.updateMatrixWorld();
+    tilt.updateMatrixWorld(true);
+    let target = null;
+    for (let ny = 0.15; ny > -0.4 && !target; ny -= 0.05) {
+      ndc.set(0, ny);
+      raycaster.setFromCamera(ndc, camera);
+      const hit = raycaster.intersectObject(globe, false)[0];
+      if (hit) {
+        target = hit.point.sub(tilt.position).normalize(); // dir in world
+        qTmp2.copy(tilt.quaternion).invert();
+        target.applyQuaternion(qTmp2); // → tilt space
+      }
+    }
+    tilt.position.y = prevY;
+    if (target) {
+      const yaw = Math.atan2(target.x, target.z) - Math.atan2(v.x, v.z);
+      qTmp.setFromAxisAngle(Y_AXIS, yaw);
+      const v2 = v.clone().applyQuaternion(qTmp); // country after yaw
+      const pitch =
+        Math.asin(Math.min(1, Math.max(-1, v2.y))) -
+        Math.asin(Math.min(1, Math.max(-1, target.y)));
+      selQuat
+        .setFromAxisAngle(X_AXIS, pitch)
+        .multiply(qTmp)
+        .multiply(spin.quaternion);
+    }
   }
   idleTime = 0; // auto-rotation eases back in smoothly on deselect
 }
@@ -649,40 +677,43 @@ function updateLabels() {
   // dense clusters stack deep — split each side into two lanes:
   // even labels float at their line tip, odd ones pin to the edge column
   const GAP = w < 560 ? 11 : 15;
-  for (const side of ['left', 'right']) {
-    const isRight = side === 'right';
-    const group = shown
-      .filter((a) => (a.x < w / 2) !== isRight)
-      .sort((p, q) => p.y - q.y);
-    if (!group.length) continue;
-    // narrow screens can't fit two columns — everything pins to the edge;
-    // a selected country instead floats every label at its own line tip
-    const singleLane = w < 560;
-    const maxW = Math.max(...group.map((a) => a.w));
-    const lanes = selectedId ? [0] : singleLane ? [1] : [0, 1];
-    for (const lane of lanes) {
-      const items =
-        singleLane || selectedId ? group : group.filter((_, i) => i % 2 === lane);
-      for (let i = 0; i < items.length; i++) {
-        const a = items[i];
-        const halfW = a.w / 2;
-        if (isRight) {
-          a.x =
-            lane === 1
-              ? w - 10 - halfW
-              : selectedId
-                ? a.x
-                : Math.min(a.x, w - 25 - maxW - halfW);
-        } else {
-          a.x =
-            lane === 1
-              ? 10 + halfW
-              : selectedId
-                ? a.x
-                : Math.max(a.x, 25 + maxW + halfW);
-        }
-        if (i > 0 && a.y < items[i - 1].y + GAP) {
-          a.y = Math.min(items[i - 1].y + GAP, h - 12);
+  if (selectedId) {
+    // one country, one fan: single stack sorted by tip height so labels
+    // can't collide across the centre split
+    shown.sort((p, q) => p.y - q.y);
+    for (let i = 1; i < shown.length; i++) {
+      const a = shown[i];
+      if (a.y < shown[i - 1].y + GAP)
+        a.y = Math.min(shown[i - 1].y + GAP, h - 12);
+    }
+  } else {
+    for (const side of ['left', 'right']) {
+      const isRight = side === 'right';
+      const group = shown
+        .filter((a) => (a.x < w / 2) !== isRight)
+        .sort((p, q) => p.y - q.y);
+      if (!group.length) continue;
+      // narrow screens can't fit two columns — everything pins to the edge
+      const singleLane = w < 560;
+      const maxW = Math.max(...group.map((a) => a.w));
+      const lanes = singleLane ? [1] : [0, 1];
+      for (const lane of lanes) {
+        const items = singleLane
+          ? group
+          : group.filter((_, i) => i % 2 === lane);
+        for (let i = 0; i < items.length; i++) {
+          const a = items[i];
+          const halfW = a.w / 2;
+          if (isRight) {
+            a.x =
+              lane === 1 ? w - 10 - halfW : Math.min(a.x, w - 25 - maxW - halfW);
+          } else {
+            a.x =
+              lane === 1 ? 10 + halfW : Math.max(a.x, 25 + maxW + halfW);
+          }
+          if (i > 0 && a.y < items[i - 1].y + GAP) {
+            a.y = Math.min(items[i - 1].y + GAP, h - 12);
+          }
         }
       }
     }
@@ -719,6 +750,22 @@ if (view.has('sel')) {
   // snap to the aimed pose — screenshots don't wait for the slerp
   spin.quaternion.copy(selQuat);
   tilt.position.y = selTiltY;
+  // report where the country's centroid actually landed
+  const d = new THREE.Vector3();
+  for (const e of ENTRIES) if (e[4] === selectedId) d.add(dirFromLatLon(e[1], e[2]));
+  d.normalize();
+  const vt = d.clone().applyQuaternion(spin.quaternion); // tilt space
+  const el = (Math.asin(Math.min(1, Math.max(-1, vt.y))) * 180) / Math.PI;
+  const az = (Math.atan2(vt.x, vt.z) * 180) / Math.PI;
+  camera.updateMatrixWorld();
+  scene.updateMatrixWorld(true);
+  const vw = d.clone().applyQuaternion(spin.quaternion).applyQuaternion(tilt.quaternion);
+  const p = vw.clone().multiplyScalar(R).add(tilt.position).project(camera);
+  const div = document.createElement('div');
+  div.style.cssText =
+    'position:fixed;bottom:8px;left:8px;color:#0f0;font:14px monospace;z-index:99;background:#000';
+  div.textContent = `sel=${selectedId} az=${az.toFixed(1)} el=${el.toFixed(1)} ndc=(${p.x.toFixed(2)},${p.y.toFixed(2)}) scr=(${(((p.x + 1) / 2) * viewW()).toFixed(0)},${(((1 - p.y) / 2) * viewH()).toFixed(0)})`;
+  document.body.appendChild(div);
 }
 // debug: ?pick=x,y synthesizes a click at those client coords
 if (view.has('pick')) {
